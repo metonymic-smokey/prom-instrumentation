@@ -1,12 +1,10 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
 	"net/http"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -36,49 +34,34 @@ var jobsInQueue = promauto.NewGauge(
 	},
 )
 
-type Temperature struct {
-	Temp float64 `json:"temperature"`
-}
+var httpDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	Name: "http_response_time_seconds",
+	Help: "Duration of HTTP requests.",
+}, []string{"path"})
 
-type Final struct {
-	StartTime string      `json:"startTime"`
-	Values    Temperature `json:"values"`
-}
+func prometheusMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		route := mux.CurrentRoute(r)
+		path, _ := route.GetPathTemplate()
 
-type Interval struct {
-	Timestep  string  `json:"timestep"`
-	StartTime string  `json:"startTime"`
-	EndTime   string  `json:"endTime"`
-	TempVal   []Final `json:"intervals"`
-}
+		timer := prometheus.NewTimer(httpDuration.WithLabelValues(path))
 
-type Timelines struct {
-	Timestep []Interval `json:"timelines"`
-}
-
-type Response struct {
-	Data Timelines `json:"data"`
+		timer.ObserveDuration()
+	})
 }
 
 func main() {
-	url := fmt.Sprintf("https://api.tomorrow.io/v4/timelines?location=%f,%f&fields=temperature&timesteps=%s&units=%s", 73.98529171943665, 40.75872069597532, "1h", "metric")
 
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Add("apikey", "APIKEY")
-	res, _ := http.DefaultClient.Do(req)
-	defer res.Body.Close()
-
-	body, _ := ioutil.ReadAll(res.Body)
-
-	var dat Response
-	if err := json.Unmarshal(body, &dat); err != nil {
-		panic(err)
-	}
+	dat := getTempData()
 
 	for _, interval := range dat.Data.Timestep[0].TempVal {
 		recordMetrics(interval.Values.Temp)
 	}
 
-	http.Handle("/metrics", promhttp.Handler())
+	router := mux.NewRouter()
+	router.Use(prometheusMiddleware)
+
+	//http.Handle("/metrics", promhttp.Handler())
+	router.Path("/metrics").Handler(promhttp.Handler())
 	http.ListenAndServe(":2112", nil)
 }

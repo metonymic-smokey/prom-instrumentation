@@ -15,12 +15,17 @@ type CityStats struct {
 
 //temperature by country
 func (c *CityStats) TemperatureAndHumidity() (
-	tempByCity map[string]int, humidityByCity map[string]float64,
+	tempByCity map[string]float64, humidityByCity map[string]float64,
 ) {
-	tempByCity = map[string]int{
-		"bangalore": rand.Intn(100),
-		"london":    rand.Intn(1000),
+	// get real time API temp data here
+	tempByCity = make(map[string]float64)
+	dat := getTempData()
+	cities := []string{"bangalore", "london"}
+
+	for ind, interval := range dat.Data.Timestep[0].TempVal {
+		tempByCity[cities[ind%2]] = interval.Values.Temp
 	}
+
 	humidityByCity = map[string]float64{
 		"bangalore": rand.Float64(),
 		"london":    rand.Float64(),
