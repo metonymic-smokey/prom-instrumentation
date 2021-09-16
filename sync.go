@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -19,7 +20,15 @@ func (c *CityStats) TemperatureAndHumidity() (
 ) {
 	// get real time API temp data here
 	tempByCity = make(map[string]float64)
-	dat := getTempData()
+	dat, err := getTempData()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if len(dat.Data.Timestep) == 0 {
+		return
+	}
+
 	cities := []string{"bangalore", "london"}
 
 	for ind, interval := range dat.Data.Timestep[0].TempVal {

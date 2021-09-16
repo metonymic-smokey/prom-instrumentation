@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -31,20 +32,29 @@ type Response struct {
 	Data Timelines `json:"data"`
 }
 
-func getTempData() Response {
+func getTempData() (Response, error) {
 	url := fmt.Sprintf("https://api.tomorrow.io/v4/timelines?location=%f,%f&fields=temperature&timesteps=%s&units=%s", 73.98529171943665, 40.75872069597532, "1h", "metric")
 
-	req, _ := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return Response{}, errors.New("error in GET request")
+	}
 	req.Header.Add("apikey", "APIKEY")
-	res, _ := http.DefaultClient.Do(req)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return Response{}, err
+	}
 	defer res.Body.Close()
 
-	body, _ := ioutil.ReadAll(res.Body)
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return Response{}, errors.New("error reading response")
+	}
 
 	var dat Response
 	if err := json.Unmarshal(body, &dat); err != nil {
-		panic(err)
+		return Response{}, errors.New("error unmarshalling JSON")
 	}
 
-	return dat
+	return dat, nil
 }

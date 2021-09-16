@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -12,7 +13,15 @@ import (
 
 func recordMetrics() {
 	for {
-		dat := getTempData()
+		dat, err := getTempData()
+		if err != nil {
+			fmt.Println(err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		if len(dat.Data.Timestep) == 0 {
+			continue
+		}
 
 		for _, interval := range dat.Data.Timestep[0].TempVal {
 			jobsInQueue.Set(interval.Values.Temp)
@@ -54,7 +63,6 @@ func prometheusMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-
 	go recordMetrics()
 
 	router := mux.NewRouter()
