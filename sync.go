@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -26,6 +27,7 @@ func (c *CityStats) TemperatureAndHumidity() (
 		return
 	}
 	if len(dat.Data.Timestep) == 0 {
+		fmt.Println("empty result!")
 		return
 	}
 
@@ -57,6 +59,11 @@ var (
 		"humidity of a city as a fraction",
 		[]string{"city"}, nil,
 	)
+	httpDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "http_response_time_seconds",
+		Help:    "Duration of HTTP requests.",
+		Buckets: prometheus.LinearBuckets(20, 5, 5),
+	})
 )
 
 func (cc CityStatsCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -64,7 +71,11 @@ func (cc CityStatsCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (cc CityStatsCollector) Collect(ch chan<- prometheus.Metric) {
+	begin := time.Now()
 	tempByCity, humidityByCity := cc.CityStats.TemperatureAndHumidity()
+	duration := time.Since(begin)
+	httpDuration.Observe(float64(duration))
+
 	for city, temp := range tempByCity {
 		ch <- prometheus.MustNewConstMetric(
 			tempDesc,
@@ -102,6 +113,7 @@ func main() {
 	reg.MustRegister(
 		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
 		prometheus.NewGoCollector(),
+		httpDuration,
 	)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
