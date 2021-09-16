@@ -10,14 +10,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func recordMetrics(temp float64) {
-	go func() {
-		for {
-			opsProcessed.Inc()
-			jobsInQueue.Set(temp)
-			time.Sleep(2 * time.Second)
+func recordMetrics() {
+	for {
+		dat := getTempData()
+
+		for _, interval := range dat.Data.Timestep[0].TempVal {
+			jobsInQueue.Set(interval.Values.Temp)
 		}
-	}()
+
+		opsProcessed.Inc()
+		time.Sleep(2 * time.Second)
+	}
 }
 
 var opsProcessed = promauto.NewGauge(
@@ -52,11 +55,7 @@ func prometheusMiddleware(next http.Handler) http.Handler {
 
 func main() {
 
-	dat := getTempData()
-
-	for _, interval := range dat.Data.Timestep[0].TempVal {
-		recordMetrics(interval.Values.Temp)
-	}
+	go recordMetrics()
 
 	router := mux.NewRouter()
 	router.Use(prometheusMiddleware)
