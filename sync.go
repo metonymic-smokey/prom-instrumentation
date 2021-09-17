@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -15,12 +17,26 @@ type CityStats struct {
 
 //temperature by country
 func (c *CityStats) TemperatureAndHumidity() (
-	tempByCity map[string]int, humidityByCity map[string]float64,
+	tempByCity map[string]float64, humidityByCity map[string]float64,
 ) {
-	tempByCity = map[string]int{
-		"bangalore": rand.Intn(100),
-		"london":    rand.Intn(1000),
+	// get real time API temp data here
+	tempByCity = make(map[string]float64)
+	dat, err := getTempData()
+	if err != nil {
+		fmt.Println(err)
+		return
 	}
+	if len(dat.Data.Timestep) == 0 {
+		fmt.Println("empty result!")
+		return
+	}
+
+	cities := []string{"bangalore", "london"}
+
+	for ind, interval := range dat.Data.Timestep[0].TempVal {
+		tempByCity[cities[ind%2]] = interval.Values.Temp
+	}
+
 	humidityByCity = map[string]float64{
 		"bangalore": rand.Float64(),
 		"london":    rand.Float64(),
@@ -43,6 +59,11 @@ var (
 		"humidity of a city as a fraction",
 		[]string{"city"}, nil,
 	)
+	httpDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "http_response_time_seconds",
+		Help:    "Duration of HTTP requests.",
+		Buckets: prometheus.LinearBuckets(20, 5, 5),
+	})
 )
 
 func (cc CityStatsCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -50,7 +71,11 @@ func (cc CityStatsCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (cc CityStatsCollector) Collect(ch chan<- prometheus.Metric) {
+	begin := time.Now()
 	tempByCity, humidityByCity := cc.CityStats.TemperatureAndHumidity()
+	duration := time.Since(begin)
+	httpDuration.Observe(float64(duration))
+
 	for city, temp := range tempByCity {
 		ch <- prometheus.MustNewConstMetric(
 			tempDesc,
@@ -88,6 +113,7 @@ func main() {
 	reg.MustRegister(
 		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
 		prometheus.NewGoCollector(),
+		httpDuration,
 	)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))

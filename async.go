@@ -1,25 +1,35 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func recordMetrics(temp float64) {
-	go func() {
-		for {
-			opsProcessed.Inc()
-			jobsInQueue.Set(temp)
+func recordMetrics() {
+	for {
+		dat, err := getTempData()
+		if err != nil {
+			fmt.Println(err)
 			time.Sleep(2 * time.Second)
+			continue
 		}
-	}()
+		if len(dat.Data.Timestep) == 0 {
+			continue
+		}
+
+		for _, interval := range dat.Data.Timestep[0].TempVal {
+			jobsInQueue.Set(interval.Values.Temp)
+		}
+
+		opsProcessed.Inc()
+		time.Sleep(2 * time.Second)
+	}
 }
 
 var opsProcessed = promauto.NewGauge(
@@ -36,49 +46,29 @@ var jobsInQueue = promauto.NewGauge(
 	},
 )
 
-type Temperature struct {
-	Temp float64 `json:"temperature"`
-}
+var httpDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	Name: "http_response_time_seconds",
+	Help: "Duration of HTTP requests.",
+}, []string{"path"})
 
-type Final struct {
-	StartTime string      `json:"startTime"`
-	Values    Temperature `json:"values"`
-}
+func prometheusMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		route := mux.CurrentRoute(r)
+		path, _ := route.GetPathTemplate()
 
-type Interval struct {
-	Timestep  string  `json:"timestep"`
-	StartTime string  `json:"startTime"`
-	EndTime   string  `json:"endTime"`
-	TempVal   []Final `json:"intervals"`
-}
+		timer := prometheus.NewTimer(httpDuration.WithLabelValues(path))
 
-type Timelines struct {
-	Timestep []Interval `json:"timelines"`
-}
-
-type Response struct {
-	Data Timelines `json:"data"`
+		timer.ObserveDuration()
+	})
 }
 
 func main() {
-	url := fmt.Sprintf("https://api.tomorrow.io/v4/timelines?location=%f,%f&fields=temperature&timesteps=%s&units=%s", 73.98529171943665, 40.75872069597532, "1h", "metric")
+	go recordMetrics()
 
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Add("apikey", "APIKEY")
-	res, _ := http.DefaultClient.Do(req)
-	defer res.Body.Close()
+	router := mux.NewRouter()
+	router.Use(prometheusMiddleware)
 
-	body, _ := ioutil.ReadAll(res.Body)
-
-	var dat Response
-	if err := json.Unmarshal(body, &dat); err != nil {
-		panic(err)
-	}
-
-	for _, interval := range dat.Data.Timestep[0].TempVal {
-		recordMetrics(interval.Values.Temp)
-	}
-
-	http.Handle("/metrics", promhttp.Handler())
+	//http.Handle("/metrics", promhttp.Handler())
+	router.Path("/metrics").Handler(promhttp.Handler())
 	http.ListenAndServe(":2112", nil)
 }
